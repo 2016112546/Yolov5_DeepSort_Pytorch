@@ -22,8 +22,8 @@ import torch.backends.cudnn as cudnn
 
 
 palette = (2 ** 11 - 1, 2 ** 15 - 1, 2 ** 20 - 1)
-
-
+fallen = [[]]
+fallen.clear()
 def xyxy_to_xywh(*xyxy):
     """" Calculates the relative bounding box from absolute pixel values. """
     bbox_left = min([xyxy[0].item(), xyxy[2].item()])
@@ -53,11 +53,14 @@ def compute_color_for_labels(label):
     """
     Simple function that adds fixed color depending on the class
     """
-    color = [int((p * (label ** 2 - label + 1)) % 255) for p in palette]
-    return tuple(color)
+    if(label==0):
+        color=tuple((0,0,255))
+    else:
+        color=tuple((152,152,255))
+    return color
 
 
-def draw_boxes(img, bbox, identities=None, offset=(0, 0)):
+def draw_boxes(img, bbox, fallen ,identities=None, offset=(0, 0)):
     for i, box in enumerate(bbox):
         x1, y1, x2, y2 = [int(i) for i in box]
         x1 += offset[0]
@@ -66,7 +69,11 @@ def draw_boxes(img, bbox, identities=None, offset=(0, 0)):
         y2 += offset[1]
         # box text and bar
         id = int(identities[i]) if identities is not None else 0
-        color = compute_color_for_labels(id)
+        fallens=fallen[i]
+        if(fallens[1]>100):
+            color =compute_color_for_labels(0)
+        else:
+            color = compute_color_for_labels(1)
         label = '{}{:d}'.format("", id)
         t_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_PLAIN, 2, 2)[0]
         cv2.rectangle(img, (x1, y1), (x2, y2), color, 3)
@@ -189,28 +196,57 @@ def detect(opt):
                 xywhs = torch.Tensor(xywh_bboxs)
                 confss = torch.Tensor(confs)
 
-                # pass detections to deepsort
-                outputs = deepsort.update(xywhs, confss, im0)
 
+                # pass detections to deepsort
+                outputs = deepsort.update(xywhs, confss,im0)
                 # draw boxes for visualization
                 if len(outputs) > 0:
                     bbox_xyxy = outputs[:, :4]
                     identities = outputs[:, -1]
-                    draw_boxes(im0, bbox_xyxy, identities)
                     # to MOT format
                     tlwh_bboxs = xyxy_to_tlwh(bbox_xyxy)
 
+
+
                     # Write MOT compliant results to file
                     if save_txt:
+                        for j, (tlwh_bbox, output ) in enumerate(zip(tlwh_bboxs, outputs )):
+                            bbox_top = tlwh_bbox[0]
+                            bbox_left = tlwh_bbox[1]
+                            bbox_w = tlwh_bbox[2]
+                            bbox_h = tlwh_bbox[3]
+                            identity = output[-1]
+
+
+                            with open(txt_path, 'a') as f:
+                                f.write(('%g ' * 10 + '\n') % (frame_idx, identity, bbox_top,
+                                                            bbox_left, bbox_w, bbox_h, -1, -1, -1, -1 ))  # label format
+
+                            fall_exist=True
+
+                            if len(fallen) > 0:
+                                for i in range(len(fallen)):
+                                    if(int(identity) == int(fallen[i][0])):
+                                        fall_exist=False
+                                        num=fallen[i][-1]
+                                        fallen[i]=[identity,num+1]
+
+                                if(fall_exist):
+                                    fallen.append([identity,0])
+
+                            else :
+                                fallen.append([identity,0])
+
+                        draw_boxes(im0, bbox_xyxy, fallen, identities)
+
                         for j, (tlwh_bbox, output) in enumerate(zip(tlwh_bboxs, outputs)):
                             bbox_top = tlwh_bbox[0]
                             bbox_left = tlwh_bbox[1]
                             bbox_w = tlwh_bbox[2]
                             bbox_h = tlwh_bbox[3]
                             identity = output[-1]
-                            with open(txt_path, 'a') as f:
-                                f.write(('%g ' * 10 + '\n') % (frame_idx, identity, bbox_top,
-                                                            bbox_left, bbox_w, bbox_h, -1, -1, -1, -1))  # label format
+
+
 
             else:
                 deepsort.increment_ages()
